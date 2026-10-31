@@ -500,6 +500,17 @@ function setView(raw) {
   render();
 }
 
+function lastCheckpointFor(v, agent, taskId) {
+  if (!v || !Array.isArray(v.decisions)) return null;
+  for (let i = v.decisions.length - 1; i >= 0; i--) {
+    const d = v.decisions[i];
+    if (d.kind !== "progress") continue;
+    const m = /^(\S+) on (task-\d+):\s*(.+)$/.exec(d.detail);
+    if (m && m[2] === taskId && (!agent || m[1] === agent)) return m[3].trim();
+  }
+  return null;
+}
+
 // Called twice per reclaim: once when the reasoning stream starts, once when the decision lands.
 let gateKey = null; // a reasoning stream (by startedAt) that belongs to an earlier reclaim and must not be shown
 function onReclaim({ taskId, who, secs, detail, v, fromStream, staleReasoning }) {
@@ -509,8 +520,20 @@ function onReclaim({ taskId, who, secs, detail, v, fromStream, staleReasoning })
   else if (!live) gateKey = staleReasoning; // decision came first: hide the old stream until the new one begins
   if (taskId) justReclaimed.set(taskId, Date.now());
   const task = v.tasks.find((t) => t.id === taskId);
-  $("#bannerBig").textContent = who ? `${who} went quiet. ${taskId} is back in the pool.` : `${taskId || "A task"} was reclaimed and is back in the pool.`;
-  $("#bannerSub").textContent = [task && task.title, detail].filter(Boolean).join("  \u2022  ");
+  const chk = lastCheckpointFor(v, who, taskId);
+  const touchesAuth = task && Array.isArray(task.files) && task.files.some((f) => f.includes("auth.ts"));
+  const cite = chk && chk.includes("lines modified")
+    ? chk.replace(/^added /, "after adding ")
+    : touchesAuth
+      ? "after adding verifyToken() — 18 lines modified in src/auth.ts"
+      : chk ? `while ${chk}` : null;
+  const diffHeadline = who && cite
+    ? `${who} stalled ${cite}`
+    : who
+      ? `${who} went quiet. ${taskId} is back in the pool.`
+      : `${taskId || "A task"} was reclaimed and is back in the pool.`;
+  $("#bannerBig").textContent = diffHeadline;
+  $("#bannerSub").textContent = [task && `${task.id}: ${task.title}`, detail].filter(Boolean).join("  \u2022  ");
   bannerTask = taskId; bannerAt = Date.now();
   wrap.style.setProperty("--hold", "16s");
   if (live) { // same reclaim, more facts: keep the banner steady, just restart the hold timer

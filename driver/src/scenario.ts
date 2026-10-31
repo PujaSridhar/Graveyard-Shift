@@ -1,5 +1,6 @@
 import { actors } from "../generated/index.js"
 import { explainReclaim } from "../../actor/src/reasoning.ts"
+import { applyWorkerEdit, inspectWorkspaceDiff, resetWorkspace } from "../../bridge/src/workspace.ts"
 
 /**
  * The demo scenario, and the proof that the supervisor works.
@@ -49,11 +50,15 @@ async function main() {
     await job.claimTask("claude-code", "task-3")
     render("both agents claimed (collision avoided)", await job.snapshot())
 
-    // claude-code keeps working. codex reports once then dies.
-    await job.reportProgress("codex", "task-1", "editing src/auth.ts middleware")
-    await job.reportProgress("claude-code", "task-3", "added backoff helper")
+    // claude-code keeps working. codex writes real edits to .tmp/workspace/src/auth.ts then dies.
+    resetWorkspace()
+    const note0 = applyWorkerEdit(["src/auth.ts", "src/session.ts"], 0)
+    await job.reportProgress("codex", "task-1", note0)
+    const note1 = applyWorkerEdit(["src/auth.ts", "src/session.ts"], 1)
+    await job.reportProgress("codex", "task-1", note1)
+    await job.reportProgress("claude-code", "task-3", applyWorkerEdit(["src/http.ts"], 0))
     await sleep(2_500)
-    await job.reportProgress("claude-code", "task-3", "wired it into the client")
+    await job.reportProgress("claude-code", "task-3", applyWorkerEdit(["src/http.ts"], 1))
 
     console.log("\n*** codex goes silent here — no more progress reports ***")
 
@@ -70,6 +75,8 @@ async function main() {
     const task1 = after.tasks.find((t) => t.id === "task-1")
 
     if (reclaimed.length > 0 && task1) {
+        const diff = inspectWorkspaceDiff(task1.files)
+        console.log(`\n  [workspace git diff] ${diff.summary}`)
         await job.startReasoning("task-1")
         let full = ""
         await explainReclaim(
@@ -80,7 +87,9 @@ async function main() {
                 agent: "codex",
                 silentForMs: 6_000,
                 attempts: task1.attempts,
-                lastProgressNote: "editing src/auth.ts middleware",
+                lastProgressNote: note1,
+                diffSummary: diff.summary,
+                diffPatch: diff.patch,
                 otherAgents: ["claude-code"],
                 recentDecisions: after.decisions.slice(-6).map((d) => ({ kind: d.kind, detail: d.detail })),
             },
@@ -90,7 +99,7 @@ async function main() {
         )
         await job.setReasoningText(full)
         await job.finishReasoning()
-        console.log(`\n  [AI reasoning] ${full}`)
+        console.log(`  [AI reasoning] ${full}`)
     }
 
     const finalView = await job.snapshot()

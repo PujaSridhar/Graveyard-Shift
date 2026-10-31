@@ -1,6 +1,7 @@
 import { actors } from "../generated/index.js"
 import { listMessages, post, dm, newerThan, type RelayMessage } from "./relay.js"
 import { explainReclaim, buildSteerMessage, type ReclaimContext } from "../../actor/src/reasoning.ts"
+import { inspectWorkspaceDiff, resetWorkspace } from "./workspace.js"
 
 /**
  * The bridge between the agents and the supervisor.
@@ -132,6 +133,7 @@ async function drainOutbound(): Promise<void> {
         const isReset = lastStartedAt > 0
         lastStartedAt = view.startedAt
         if (isReset) announcedDecisions = 0
+        resetWorkspace()
         const open = view.tasks.filter((t) => t.state === "pending")
         if (open.length > 0) {
             const lines = open.map((t) => `${t.id}: ${t.title} [${t.files.join(", ")}]`).join("\n")
@@ -202,6 +204,7 @@ async function streamReasoning(detail: string, view: Awaited<ReturnType<typeof j
 
     const others = findOtherAgents(view, agent!)
     const lastProgressNote = findLastProgressNote(view, agent!, taskId!)
+    const diff = inspectWorkspaceDiff(task.files)
     const ctx: ReclaimContext = {
         taskId: taskId!,
         taskTitle: task.title,
@@ -209,7 +212,9 @@ async function streamReasoning(detail: string, view: Awaited<ReturnType<typeof j
         agent: agent!,
         silentForMs: Number(silentSecs) * 1000,
         attempts: task.attempts,
-        lastProgressNote,
+        lastProgressNote: lastProgressNote ?? diff.summary,
+        diffSummary: diff.summary,
+        diffPatch: diff.patch,
         otherAgents: others,
         recentDecisions: view.decisions.slice(-8).map((x) => ({ kind: x.kind, detail: x.detail })),
     }

@@ -1,4 +1,5 @@
 import { listMessages, post, newerThan } from "./relay.js"
+import { applyWorkerEdit, resetWorkspace } from "./workspace.js"
 
 /**
  * A worker agent. Its own process, its own Relay identity, real messages.
@@ -60,6 +61,7 @@ let ticks = 0
 let wentQuiet = false
 
 const known = new Map<string, string>() // taskId -> title
+const knownFiles = new Map<string, string[]>() // taskId -> files[]
 const taken = new Set<string>() // claimed by anyone, including me
 const refusedIds = new Set<string>() // the supervisor told us no; only a reclaim clears it
 
@@ -77,17 +79,27 @@ async function observe(): Promise<void> {
             // the previous one, or stale claims make every task look taken.
             if (/^OPEN TASKS/im.test(text)) {
                 known.clear()
+                knownFiles.clear()
                 taken.clear()
                 refusedIds.clear()
                 myTask = null
                 ticks = 0
                 wentQuiet = false
-                console.log("  new board posted — resetting my view")
+                resetWorkspace()
+                console.log("  new board posted — resetting my view & workspace")
             }
             // The opening board: "task-1: title [files]" per line.
             for (const line of text.split("\n")) {
-                const open = line.match(/^(task-\d+):\s*(.+?)\s*(?:\[|$)/i)
-                if (open) known.set(open[1]!.toLowerCase(), open[2]!.trim())
+                const open = line.match(/^(task-\d+):\s*(.+?)\s*(?:\[([^\]]*)\]|$)/i)
+                if (open) {
+                    const id = open[1]!.toLowerCase()
+                    known.set(id, open[2]!.trim())
+                    const files = (open[3] ?? "")
+                        .split(",")
+                        .map((s) => s.trim())
+                        .filter(Boolean)
+                    if (files.length > 0) knownFiles.set(id, files)
+                }
             }
             // A refusal aimed at an agent: if it's a file lock, the task is still unclaimed; if aimed at us, back off.
             const refused = text.match(/^@([\w-]+) cannot take (task-\d+)\s*—\s*(.+)$/i)
@@ -172,7 +184,8 @@ async function main(): Promise<void> {
                     )
                 }
             } else if (ticks < DIE_AFTER) {
-                const note = NOTES[Math.min(ticks, NOTES.length - 1)]!
+                const files = knownFiles.get(myTask) ?? ["src/auth.ts"]
+                const note = applyWorkerEdit(files, ticks)
                 await post(CHANNEL, `PROGRESS ${myTask} — ${note}`, token!)
                 console.log(`  ${myTask} progress ${ticks + 1}: ${note}`)
                 ticks++

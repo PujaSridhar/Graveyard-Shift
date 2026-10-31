@@ -17,6 +17,10 @@ export type ReclaimContext = {
     attempts: number
     /** Last progress note reported by the stalled agent before going silent. */
     lastProgressNote?: string
+    /** Concrete git diff summary (e.g. "after adding verifyToken() — 18 lines modified in src/auth.ts"). */
+    diffSummary?: string
+    /** Unified git diff patch from the workspace. */
+    diffPatch?: string
     /** Candidates it could be reassigned to. */
     otherAgents: string[]
     /** Most recent last. */
@@ -34,8 +38,9 @@ const MAX_CHARS = 220
 
 const SYSTEM_PROMPT =
     "You are the supervisor of a team of coding agents. A task's agent has gone silent and you are reclaiming it. " +
-    "In ONE or TWO terse sentences (max 200 characters total), state what you think happened and what you are doing about it, " +
-    "naming the task, the silent agent, and the agent you hand it to (if any). " +
+    "In ONE or TWO terse sentences (max 200 characters total), state what the agent was doing when it stalled — " +
+    "MUST cite the exact function name and modified line count from the git diff if provided (e.g. 'codex stalled after adding verifyToken() — 18 lines modified in src/auth.ts') — " +
+    "and name the agent you are handing the task to. " +
     "Plain text only: no preamble, no bullets, no markdown, no quotes."
 
 function seconds(ms: number): string {
@@ -46,19 +51,22 @@ function seconds(ms: number): string {
 /** Deterministic sentence built purely from ctx. */
 export function fallbackReclaim(ctx: ReclaimContext): string {
     const next = ctx.otherAgents[0]
-    const tries = ctx.attempts === 1 ? "one attempt" : `${ctx.attempts} attempts`
-    const chk = ctx.lastProgressNote ? ` while ${ctx.lastProgressNote}` : ""
+    const diffCite = ctx.diffSummary
+        ? ` ${ctx.diffSummary}`
+        : ctx.lastProgressNote
+          ? ` while ${ctx.lastProgressNote}`
+          : ` after ${seconds(ctx.silentForMs)}s of silence`
     const tail = next
-        ? `releasing [${ctx.files.join(", ") || ctx.taskId}] and steering ${next} to take over.`
+        ? `reclaiming ${ctx.taskId} and steering ${next} to finish it.`
         : `putting "${ctx.taskTitle}" back up for grabs.`
-    return `${ctx.agent} stalled for ${seconds(ctx.silentForMs)}s on ${ctx.taskId}${chk} (${tries}) — ${tail}`
+    return `${ctx.agent} stalled${diffCite} — ${tail}`
 }
 
 /** Builds the Agent Relay DM steer payload sent to the surviving agent. */
 export function buildSteerMessage(ctx: ReclaimContext, diagnosis: string): string {
     const files = ctx.files.length > 0 ? ` [${ctx.files.join(", ")}]` : ""
-    const checkpoint = ctx.lastProgressNote ? ` Last checkpoint from ${ctx.agent}: "${ctx.lastProgressNote}".` : ""
-    return `STEER ${ctx.taskId}${files} — "${ctx.taskTitle}".${checkpoint} Supervisor: ${diagnosis}`
+    const diffInfo = ctx.diffSummary ? ` Uncommitted diff: ${ctx.diffSummary}.` : ""
+    return `STEER ${ctx.taskId}${files} — "${ctx.taskTitle}".${diffInfo} Supervisor: ${diagnosis}`
 }
 
 function buildUserPrompt(ctx: ReclaimContext): string {
@@ -70,6 +78,8 @@ function buildUserPrompt(ctx: ReclaimContext): string {
         `Task ${ctx.taskId}: "${ctx.taskTitle}"`,
         `Files locked: ${ctx.files.slice(0, 6).join(", ") || "none"}`,
         `Silent agent: ${ctx.agent}, quiet for ${seconds(ctx.silentForMs)}s, attempts so far: ${ctx.attempts}`,
+        ctx.diffSummary ? `Git diff stat: ${ctx.diffSummary}` : "",
+        ctx.diffPatch ? `Git diff patch:\n${ctx.diffPatch}` : "",
         ctx.lastProgressNote ? `Last checkpoint before stall: "${ctx.lastProgressNote}"` : "",
         `Other agents available to steer via Agent Relay: ${ctx.otherAgents.join(", ") || "none"}`,
         recent ? `Recent decisions:\n${recent}` : "",
