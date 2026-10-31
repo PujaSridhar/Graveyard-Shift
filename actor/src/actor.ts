@@ -115,7 +115,10 @@ export class JobSupervisor extends Actor<{ viewer: string }, { kind: string }, J
             lastProgressAt: null,
             attempts: 0,
         }))
-        this.decisions = appendDecision(this.decisions, "submitted", `${this.tasks.length} tasks queued`)
+        // A fresh job starts a fresh log, so re-seeding gives an identical run.
+        this.decisions = appendDecision([], "submitted", `${this.tasks.length} tasks queued`)
+        this.beats = 0
+        this.lastBeatAt = 0
 
         this.alarm.set(Date.now() + this.heartbeatMs)
         const view = await this.snapshot()

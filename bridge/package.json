@@ -1,0 +1,10 @@
+{
+  "name": "bridge",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run src/bridge.ts",
+    "agents": "bun run src/fake-agents.ts"
+  }
+}

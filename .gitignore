@@ -12,8 +12,12 @@ dist
 .terse
 .durable-actors
 
-# Terse client — regenerate with `terse actor generate` while the dev server runs
-driver/generated
+# Terse clients — regenerate with `terse actor generate` while the dev server runs
+generated/
+**/generated/
+
+# Scratch files, including agent registration output that carries tokens
+.tmp/
 
 # Agent Relay workspace state (contains workspace keys)
 .agentworkforce
