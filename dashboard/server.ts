@@ -91,8 +91,6 @@ Bun.serve({
                 } catch {
                     /* empty body */
                 }
-                resetRelayMirror()
-                resetWorkspace()
                 const tasks = goal ? await decomposeGoal(goal) : fallbackDecompose()
                 const view = await job().submitJob(tasks, {
                     heartbeatMs: HEARTBEAT_MS,

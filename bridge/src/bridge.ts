@@ -125,25 +125,28 @@ async function apply(msg: RelayMessage, cmd: Command): Promise<void> {
 }
 
 /** Push supervisor decisions back out, so agents hear about reclaims and new boards. */
-async function drainOutbound(): Promise<void> {
+async function syncNewBoardIfSeeded(): Promise<boolean> {
     const view = await job.snapshot()
-
-    // Whenever a fresh job is submitted (via seed.ts or dashboard UI), announce the new board!
     if (view.startedAt > 0 && view.startedAt !== lastStartedAt && view.tasks.length > 0) {
-        const isReset = lastStartedAt > 0
         lastStartedAt = view.startedAt
-        if (isReset) {
-            announcedDecisions = 0
-            resetRelayMirror()
-        }
+        announcedDecisions = 0
+        resetRelayMirror()
         resetWorkspace()
         const open = view.tasks.filter((t) => t.state === "pending")
         if (open.length > 0) {
             const lines = open.map((t) => `${t.id}: ${t.title} [${t.files.join(", ")}]`).join("\n")
             await post(CHANNEL, `OPEN TASKS\n${lines}`, SUPERVISOR_TOKEN!)
+            const afterPost = await listMessages(CHANNEL, SUPERVISOR_TOKEN!, 5)
+            for (const m of afterPost) if (newerThan(m.id, highWater)) highWater = m.id
             console.log(`  announced fresh board (${open.length} tasks) for job started at ${view.startedAt}`)
         }
+        return true
     }
+    return false
+}
+
+async function drainOutbound(): Promise<void> {
+    const view = await job.snapshot()
 
     if (view.decisions.length < announcedDecisions) {
         announcedDecisions = 0
@@ -265,6 +268,7 @@ async function streamReasoning(detail: string, view: Awaited<ReturnType<typeof j
 
 async function tick(): Promise<void> {
     try {
+        await syncNewBoardIfSeeded()
         await drainInbound()
         await drainOutbound()
     } catch (err) {
