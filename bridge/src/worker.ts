@@ -191,6 +191,11 @@ async function main(): Promise<void> {
             await observe()
 
             if (!myTask) {
+                if (ME !== "codex" && taken.size === 0 && known.has("task-1")) {
+                    // Let codex claim task-1 first on a fresh board so the file-lock & stall beats are deterministic
+                    await new Promise((r) => setTimeout(r, 700))
+                    await observe()
+                }
                 const pick = nextFreeTask()
                 if (pick) {
                     myTask = pick
@@ -240,7 +245,8 @@ async function main(): Promise<void> {
         } catch (err) {
             console.error("  worker error:", err instanceof Error ? err.message : err)
         }
-        await new Promise((r) => setTimeout(r, TICK_MS))
+        const delay = !myTask || wentQuiet ? 600 : TICK_MS
+        await new Promise((r) => setTimeout(r, delay))
     }
 }
 
