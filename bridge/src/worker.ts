@@ -35,7 +35,7 @@ const args = process.argv.slice(2)
 const ME = args.find((a) => !a.startsWith("--")) ?? "codex"
 const dieIdx = args.indexOf("--die-after")
 const DIE_AFTER = dieIdx >= 0 ? Number(args[dieIdx + 1]) : Infinity
-const TICK_MS = Number(env.WORKER_TICK_MS ?? 2_500)
+const TICK_MS = Number(env.WORKER_TICK_MS ?? 4_000)
 
 const TOKENS: Record<string, string | undefined> = {
     codex: env.RELAY_CODEX_TOKEN,
