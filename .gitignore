@@ -1,0 +1,22 @@
+# Secrets — never commit these
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Dependencies and build output
+node_modules
+dist
+.terse
+.durable-actors
+
+# Terse client — regenerate with `terse actor generate` while the dev server runs
+driver/generated
+
+# Agent Relay workspace state (contains workspace keys)
+.agentworkforce
+
+# macOS
+.DS_Store
