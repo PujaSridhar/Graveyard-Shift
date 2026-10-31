@@ -73,6 +73,17 @@ async function observe(): Promise<void> {
         const text = m.text
 
         if (m.from.name === "supervisor") {
+            // A fresh board means a new run: forget everything we learned from
+            // the previous one, or stale claims make every task look taken.
+            if (/^OPEN TASKS/im.test(text)) {
+                known.clear()
+                taken.clear()
+                refusedIds.clear()
+                myTask = null
+                ticks = 0
+                wentQuiet = false
+                console.log("  new board posted — resetting my view")
+            }
             // The opening board: "task-1: title [files]" per line.
             for (const line of text.split("\n")) {
                 const open = line.match(/^(task-\d+):\s*(.+?)\s*(?:\[|$)/i)

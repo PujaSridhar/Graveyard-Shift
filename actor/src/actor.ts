@@ -34,9 +34,22 @@ export type Decision = {
     detail: string
 }
 
+/**
+ * The supervisor's live reasoning about a reclaim, streamed in token by token.
+ * The model call happens outside the actor so the API key never enters durable
+ * state; the actor owns the text and broadcasts it as it arrives.
+ */
+export type Reasoning = {
+    taskId: string
+    text: string
+    streaming: boolean
+    startedAt: number
+}
+
 export type JobView = {
     tasks: Task[]
     decisions: Decision[]
+    reasoning: Reasoning | null
     heartbeatMs: number
     stallAfterMs: number
     startedAt: number
@@ -95,6 +108,41 @@ export class JobSupervisor extends Actor<{ viewer: string }, { kind: string }, J
     @Emittable
     beats = 0
 
+    /** The live explanation of the most recent reclaim. */
+    @Persisted
+    @Emittable
+    reasoning: Reasoning | null = null
+
+    // ------------------------------------------------- live reasoning stream
+
+    /** Opens a fresh explanation. Called when a reclaim has just been recorded. */
+    async startReasoning(taskId: string): Promise<void> {
+        this.reasoning = { taskId, text: "", streaming: true, startedAt: Date.now() }
+        this.broadcast(await this.snapshot())
+    }
+
+    /**
+     * Sets the whole text so far, rather than appending a delta.
+     *
+     * Each call is a separate RPC and they can arrive out of order, which with
+     * deltas produced visibly scrambled text. Sending the cumulative string
+     * makes the write idempotent and order-independent: a stale message can
+     * only ever lose a race to a longer one, so we ignore shorter payloads.
+     */
+    async setReasoningText(text: string): Promise<void> {
+        if (!this.reasoning) return
+        if (text.length < this.reasoning.text.length) return
+        this.reasoning = { ...this.reasoning, text }
+        this.broadcast(await this.snapshot())
+    }
+
+    async finishReasoning(): Promise<void> {
+        if (!this.reasoning) return
+        this.reasoning = { ...this.reasoning, streaming: false }
+        this.decisions = appendDecision(this.decisions, "note", `supervisor: ${this.reasoning.text}`)
+        this.broadcast(await this.snapshot())
+    }
+
     // ------------------------------------------------------------- job setup
 
     async submitJob(
@@ -119,6 +167,7 @@ export class JobSupervisor extends Actor<{ viewer: string }, { kind: string }, J
         this.decisions = appendDecision([], "submitted", `${this.tasks.length} tasks queued`)
         this.beats = 0
         this.lastBeatAt = 0
+        this.reasoning = null
 
         this.alarm.set(Date.now() + this.heartbeatMs)
         const view = await this.snapshot()
@@ -207,10 +256,22 @@ export class JobSupervisor extends Actor<{ viewer: string }, { kind: string }, J
 
     // ----------------------------------------------------------------- views
 
+    /** Temporary: reports what the actor sandbox exposes. Never returns the key itself. */
+    async diagnose(): Promise<{ hasEnv: boolean; keyLen: number; hasFetch: boolean; hasAbort: boolean }> {
+        const key = typeof process !== "undefined" ? process.env?.OPENAI_API_KEY : undefined
+        return {
+            hasEnv: typeof process !== "undefined" && !!process.env,
+            keyLen: key ? key.length : 0,
+            hasFetch: typeof fetch === "function",
+            hasAbort: typeof AbortController === "function",
+        }
+    }
+
     async snapshot(): Promise<JobView> {
         return {
             tasks: this.tasks,
             decisions: this.decisions,
+            reasoning: this.reasoning,
             heartbeatMs: this.heartbeatMs,
             stallAfterMs: this.stallAfterMs,
             startedAt: this.startedAt,

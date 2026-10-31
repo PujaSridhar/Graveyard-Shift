@@ -1,5 +1,6 @@
 import { actors } from "../generated/index.js"
 import { listMessages, post, newerThan, type RelayMessage } from "./relay.js"
+import { explainReclaim, type ReclaimContext } from "../../actor/src/reasoning.ts"
 
 /**
  * The bridge between the agents and the supervisor.
@@ -13,8 +14,7 @@ import { listMessages, post, newerThan, type RelayMessage } from "./relay.js"
 
 // -------------------------------------------------------------------- config
 
-function loadEnv(): Record<string, string> {
-    const path = `${import.meta.dir}/../../.env`
+function loadEnvFile(path: string): Record<string, string> {
     const out: Record<string, string> = {}
     try {
         const text = require("node:fs").readFileSync(path, "utf8") as string
@@ -28,7 +28,18 @@ function loadEnv(): Record<string, string> {
     return out
 }
 
-const env = { ...loadEnv(), ...process.env } as Record<string, string>
+// Relay tokens live at the repo root; the model key lives with the actor.
+const env = {
+    ...loadEnvFile(`${import.meta.dir}/../../.env`),
+    ...loadEnvFile(`${import.meta.dir}/../../actor/.env`),
+    ...process.env,
+} as Record<string, string>
+
+// reasoning.ts reads process.env directly, so make the key visible to it here.
+// The key stays in this process and never reaches the actor or durable state.
+if (env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY) {
+    process.env.OPENAI_API_KEY = env.OPENAI_API_KEY
+}
 
 const CHANNEL = env.RELAY_CHANNEL ?? "taskboard"
 const SUPERVISOR_TOKEN = env.RELAY_SUPERVISOR_TOKEN
@@ -131,6 +142,70 @@ async function drainOutbound(): Promise<void> {
         if (d.kind !== "reclaimed") continue
         await post(CHANNEL, `RECLAIMED — ${d.detail}. It is open again.`, SUPERVISOR_TOKEN!)
         console.log(`  announced reclaim: ${d.detail}`)
+        void streamReasoning(d.detail, view)
+    }
+}
+
+let reasoningBusy = false
+
+/**
+ * Ask the model to explain the reclaim, streaming each chunk into the actor so
+ * the dashboard renders it live. Fire-and-forget: the supervisor must never
+ * wait on a model call, so this runs alongside the poll loop rather than in it.
+ */
+async function streamReasoning(detail: string, view: Awaited<ReturnType<typeof job.snapshot>>): Promise<void> {
+    if (reasoningBusy) return
+    const parsed = detail.match(/^(\S+) went quiet for (\d+)s on (task-\d+)/)
+    if (!parsed) return
+
+    const [, agent, silentSecs, taskId] = parsed
+    const task = view.tasks.find((t) => t.id === taskId)
+    if (!task) return
+
+    const others = [...new Set(view.tasks.map((t) => t.assignee).filter((a): a is string => !!a && a !== agent))]
+    const ctx: ReclaimContext = {
+        taskId: taskId!,
+        taskTitle: task.title,
+        files: task.files,
+        agent: agent!,
+        silentForMs: Number(silentSecs) * 1000,
+        attempts: task.attempts,
+        otherAgents: others.length > 0 ? others : ["claude-code"],
+        recentDecisions: view.decisions.slice(-8).map((x) => ({ kind: x.kind, detail: x.detail })),
+    }
+
+    reasoningBusy = true
+    try {
+        await job.startReasoning(taskId!)
+        const started = Date.now()
+        let first = 0
+        let full = ""
+        let lastPush = 0
+        // Serialise the writes: concurrent RPCs arrive out of order and would
+        // interleave the text. Chaining keeps them in sequence; throttling
+        // keeps it to a readable typing speed instead of one call per token.
+        let chain: Promise<unknown> = Promise.resolve()
+
+        await explainReclaim(ctx, (chunk) => {
+            if (!first) first = Date.now() - started
+            full += chunk
+            const now = Date.now()
+            if (now - lastPush < 70) return
+            lastPush = now
+            const text = full
+            chain = chain.then(() => job.setReasoningText(text)).catch(() => {})
+        })
+
+        // Final write so the complete text always lands, whatever the throttle ate.
+        chain = chain.then(() => job.setReasoningText(full)).catch(() => {})
+        await chain
+        await job.finishReasoning()
+        console.log(`  reasoning streamed (first token ${first}ms, total ${Date.now() - started}ms)`)
+    } catch (err) {
+        console.error("  reasoning failed:", err instanceof Error ? err.message : err)
+        await job.finishReasoning().catch(() => {})
+    } finally {
+        reasoningBusy = false
     }
 }
 
