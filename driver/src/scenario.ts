@@ -1,6 +1,6 @@
 import { actors } from "../generated/index.js"
 import { explainReclaim } from "../../actor/src/reasoning.ts"
-import { applyWorkerEdit, inspectWorkspaceDiff, resetWorkspace } from "../../bridge/src/workspace.ts"
+import { applyWorkerEdit, inspectWorkspaceDiff, resetWorkspace, runWorkspaceTests } from "../../bridge/src/workspace.ts"
 
 /**
  * The demo scenario, and the proof that the supervisor works.
@@ -118,9 +118,14 @@ async function main() {
         process.exitCode = 1
     }
 
-    // The other agent finishes normally, to show the happy path still works.
+    // The other agent finishes its current task, then resumes the reclaimed task-1 from codex's diff!
     await job.completeTask("claude-code", "task-3", "retries landed")
-    render("claude-code finished its task", await job.snapshot())
+    await job.claimTask("claude-code", "task-1")
+    await job.reportProgress("claude-code", "task-1", applyWorkerEdit(["src/auth.ts"], 0, true))
+    await job.reportProgress("claude-code", "task-1", applyWorkerEdit(["src/auth.ts"], 1, true))
+    const tests = runWorkspaceTests()
+    await job.completeTask("claude-code", "task-1", `resumed from codex's verifyToken() diff & wired expiry (${tests.summary})`)
+    render("claude-code resumed & completed task-1", await job.snapshot())
 }
 
 main().catch((err) => {

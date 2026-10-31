@@ -584,17 +584,32 @@ function activeLockFor(t) {
   return null;
 }
 
+function lastCompletionFor(v, taskId) {
+  if (!v || !Array.isArray(v.decisions)) return null;
+  for (let i = v.decisions.length - 1; i >= 0; i--) {
+    const d = v.decisions[i];
+    if (d.kind !== "completed") continue;
+    const m = /^(\S+) finished (task-\d+):\s*(.+)$/.exec(d.detail);
+    if (m && m[2] === taskId) return m[3].trim();
+  }
+  return null;
+}
+
 function taskSig(t) {
   const rec = lastReclaimFor(t.id);
   const lk = activeLockFor(t);
+  const chk = t.state === "claimed" ? lastCheckpointFor(view, t.assignee, t.id) : null;
+  const doneNote = t.state === "done" ? lastCompletionFor(view, t.id) : null;
   const jr = justReclaimed.has(t.id) && Date.now() - justReclaimed.get(t.id) < 9000;
-  return JSON.stringify([t.title, t.files, t.state, t.assignee, t.attempts, rec && [rec.who, rec.secs, rec.at], lk, jr]);
+  return JSON.stringify([t.title, t.files, t.state, t.assignee, t.attempts, rec && [rec.who, rec.secs, rec.at], lk, chk, doneNote, jr]);
 }
 
 function cardHTML(t) {
   const rec = t.state === "pending" ? lastReclaimFor(t.id) : null;
   const lk = t.state === "pending" ? activeLockFor(t) : null;
   const prior = t.state !== "pending" ? lastReclaimFor(t.id) : null;
+  const chk = t.state === "claimed" ? lastCheckpointFor(view, t.assignee, t.id) : null;
+  const doneNote = t.state === "done" ? lastCompletionFor(view, t.id) : null;
   const stateWord = { pending: lk ? "File Locked" : "Pending", claimed: "Claimed", done: "Done" }[t.state] || t.state;
 
   let foot = "";
@@ -607,11 +622,14 @@ function cardHTML(t) {
       foot = `<div class="wait">Waiting for an agent to claim it.</div>`;
     }
   } else if (t.state === "claimed") {
+    const chkLine = chk ? `<div class="wait" style="font-size:.9rem;color:var(--text-2);font-family:var(--mono)">${esc(chk)}</div>` : "";
     foot = `<div class="holder">${avatar(t.assignee || "?")}<span>Held by <b>${esc(t.assignee || "unknown")}</b></span></div>
+      ${chkLine}
       <div><div class="meter"><i></i></div>
       <div class="meter-t"><span>Last signal <b data-silent>0.0s</b> ago</span><span data-limit>${fmtSecs(view.stallAfterMs)} limit</span></div></div>`;
   } else {
-    foot = `<div class="holder">${avatar(t.assignee || "?")}<span>Finished by <b>${esc(t.assignee || "unknown")}</b></span></div>`;
+    const doneLine = doneNote ? `<div class="wait" style="font-size:.88rem;color:var(--done);font-family:var(--mono)">✓ ${esc(doneNote)}</div>` : "";
+    foot = `<div class="holder">${avatar(t.assignee || "?")}<span>Finished by <b>${esc(t.assignee || "unknown")}</b></span></div>${doneLine}`;
   }
 
   const attempt = t.attempts > 0

@@ -1,5 +1,7 @@
 import { actors } from "./generated/index.js"
 import { decomposeGoal, fallbackDecompose } from "../actor/src/reasoning.ts"
+import { resetRelayMirror } from "../bridge/src/relay.ts"
+import { resetWorkspace } from "../bridge/src/workspace.ts"
 
 /**
  * Graveyard Shift dashboard server.
@@ -38,10 +40,7 @@ const PORT = Number(process.env.PORT ?? 3100)
 const JOB_ID = process.env.JOB_ID ?? "demo"
 const RELAY_CHANNEL = process.env.RELAY_CHANNEL ?? fileEnv.RELAY_CHANNEL ?? "taskboard"
 const HEARTBEAT_MS = Number(process.env.HEARTBEAT_MS ?? 3_000)
-// Keep in step with bridge/src/seed.ts: a worker's Relay round trip is ~11s,
-// so anything near that falsely reclaims healthy agents. The Stall button
-// backdates the heartbeat to trigger the reclaim on cue instead.
-const STALL_AFTER_MS = Number(process.env.STALL_AFTER_MS ?? 30_000)
+const STALL_AFTER_MS = Number(process.env.STALL_AFTER_MS ?? 12_000)
 const job = () => actors.JobSupervisor.get(JOB_ID)
 
 const json = (body: unknown, status = 200) =>
@@ -92,6 +91,8 @@ Bun.serve({
                 } catch {
                     /* empty body */
                 }
+                resetRelayMirror()
+                resetWorkspace()
                 const tasks = goal ? await decomposeGoal(goal) : fallbackDecompose()
                 const view = await job().submitJob(tasks, {
                     heartbeatMs: HEARTBEAT_MS,

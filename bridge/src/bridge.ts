@@ -1,5 +1,5 @@
 import { actors } from "../generated/index.js"
-import { listMessages, post, dm, newerThan, type RelayMessage } from "./relay.js"
+import { listMessages, post, dm, resetRelayMirror, newerThan, type RelayMessage } from "./relay.js"
 import { explainReclaim, buildSteerMessage, type ReclaimContext } from "../../actor/src/reasoning.ts"
 import { inspectWorkspaceDiff, resetWorkspace } from "./workspace.js"
 
@@ -132,7 +132,10 @@ async function drainOutbound(): Promise<void> {
     if (view.startedAt > 0 && view.startedAt !== lastStartedAt && view.tasks.length > 0) {
         const isReset = lastStartedAt > 0
         lastStartedAt = view.startedAt
-        if (isReset) announcedDecisions = 0
+        if (isReset) {
+            announcedDecisions = 0
+            resetRelayMirror()
+        }
         resetWorkspace()
         const open = view.tasks.filter((t) => t.state === "pending")
         if (open.length > 0) {
@@ -246,11 +249,10 @@ async function streamReasoning(detail: string, view: Awaited<ReturnType<typeof j
         const nextAgent = others[0]
         if (nextAgent) {
             const steerText = buildSteerMessage(ctx, diagnosis)
-            const chkInfo = lastProgressNote ? ` (checkpoint: "${lastProgressNote}")` : ""
             await job.reportProgress(
                 "supervisor",
                 taskId!,
-                `relay dm [steer] → @${nextAgent}: take over ${taskId} [${task.files.join(", ")}]${chkInfo}`,
+                `relay dm [steer] → @${nextAgent}: resume ${taskId} from uncommitted diff (${diff.linesModified} lines in ${diff.file}, ${diff.testStatus})`,
             )
             await dm(nextAgent, steerText, SUPERVISOR_TOKEN!, "steer").catch(() => {})
             console.log(`  steered @${nextAgent} via Agent Relay DM for ${taskId}`)

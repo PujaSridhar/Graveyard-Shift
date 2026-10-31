@@ -1,5 +1,5 @@
-import { listMessages, post, newerThan } from "./relay.js"
-import { applyWorkerEdit, resetWorkspace } from "./workspace.js"
+import { listMessages, post, checkInbox, newerThan } from "./relay.js"
+import { applyWorkerEdit, resetWorkspace, runWorkspaceTests } from "./workspace.js"
 
 /**
  * A worker agent. Its own process, its own Relay identity, real messages.
@@ -56,6 +56,7 @@ const NOTES = [
 ]
 
 let highWater = "0"
+let dmHighWater = "0"
 let myTask: string | null = null
 let ticks = 0
 let wentQuiet = false
@@ -64,9 +65,23 @@ const known = new Map<string, string>() // taskId -> title
 const knownFiles = new Map<string, string[]>() // taskId -> files[]
 const taken = new Set<string>() // claimed by anyone, including me
 const refusedIds = new Set<string>() // the supervisor told us no; only a reclaim clears it
+const steeredTasks = new Set<string>() // tasks steered to us via Agent Relay DM (resume from partial diff!)
 
-/** Read the channel and update our picture of who owns what. */
+/** Read the channel and our Agent Relay DM inbox to update our picture. */
 async function observe(): Promise<void> {
+    const dms = await checkInbox(ME, dmHighWater)
+    for (const d of dms) {
+        dmHighWater = newerThan(d.id, dmHighWater) ? d.id : dmHighWater
+        const m = d.text.match(/STEER\s+(task-\d+)/i)
+        if (m) {
+            const id = m[1]!.toLowerCase()
+            steeredTasks.add(id)
+            taken.delete(id)
+            refusedIds.delete(id)
+            console.log(`  [Agent Relay DM:${d.mode}] steered onto ${id} — will resume from uncommitted diff`)
+        }
+    }
+
     const messages = await listMessages(CHANNEL, token!, 40)
     const fresh = messages.filter((m) => newerThan(m.id, highWater)).reverse()
     for (const m of fresh) highWater = m.id
@@ -82,6 +97,7 @@ async function observe(): Promise<void> {
                 knownFiles.clear()
                 taken.clear()
                 refusedIds.clear()
+                steeredTasks.clear()
                 myTask = null
                 ticks = 0
                 wentQuiet = false
@@ -156,6 +172,10 @@ async function observe(): Promise<void> {
 }
 
 function nextFreeTask(): string | null {
+    // Prioritize any task explicitly steered to us via Agent Relay DM
+    for (const id of steeredTasks) {
+        if (known.has(id) && !taken.has(id) && !refusedIds.has(id)) return id
+    }
     for (const id of [...known.keys()].sort()) {
         if (!taken.has(id) && !refusedIds.has(id)) return id
     }
@@ -185,13 +205,20 @@ async function main(): Promise<void> {
                 }
             } else if (ticks < DIE_AFTER) {
                 const files = knownFiles.get(myTask) ?? ["src/auth.ts"]
-                const note = applyWorkerEdit(files, ticks)
+                const isSteered = steeredTasks.has(myTask)
+                const note = applyWorkerEdit(files, ticks, isSteered)
                 await post(CHANNEL, `PROGRESS ${myTask} — ${note}`, token!)
                 console.log(`  ${myTask} progress ${ticks + 1}: ${note}`)
                 ticks++
-                if (ticks >= NOTES.length) {
-                    await post(CHANNEL, `DONE ${myTask} — change landed`, token!)
-                    console.log(`  completed ${myTask}`)
+                const neededTicks = isSteered ? 2 : 3
+                if (ticks >= neededTicks) {
+                    const tests = runWorkspaceTests()
+                    const summary = isSteered
+                        ? `resumed from codex's verifyToken() diff & wired expiry (${tests.summary})`
+                        : `change landed (${tests.summary})`
+                    await post(CHANNEL, `DONE ${myTask} — ${summary}`, token!)
+                    console.log(`  completed ${myTask}: ${summary}`)
+                    steeredTasks.delete(myTask)
                     myTask = null
                     ticks = 0
                 }
