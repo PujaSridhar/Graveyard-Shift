@@ -1,5 +1,5 @@
 import { listMessages, post, checkInbox, newerThan } from "./relay.js"
-import { applyWorkerEdit, resetWorkspace, runWorkspaceTests } from "./workspace.js"
+import { applyWorkerEdit, inspectWorkspaceDiff, resetWorkspace, runWorkspaceTests } from "./workspace.js"
 
 /**
  * A worker agent. Its own process, its own Relay identity, real messages.
@@ -212,10 +212,16 @@ async function main(): Promise<void> {
                 ticks++
                 const neededTicks = isSteered ? 2 : 3
                 if (ticks >= neededTicks) {
+                    // The seeded suite only covers the auth module. For a task the AI
+                    // planner invented, cite the real diff rather than an unrelated
+                    // suite that was never going to pass.
                     const tests = runWorkspaceTests()
+                    const proof = tests.passed > 0 ? tests.summary : inspectWorkspaceDiff(files).summary
                     const summary = isSteered
-                        ? `resumed from codex's verifyToken() diff & wired expiry (${tests.summary})`
-                        : `change landed (${tests.summary})`
+                        ? tests.passed > 0
+                            ? `resumed from codex's verifyToken() diff & wired expiry (${tests.summary})`
+                            : `resumed from codex's partial diff — ${proof}`
+                        : `change landed — ${proof}`
                     await post(CHANNEL, `DONE ${myTask} — ${summary}`, token!)
                     console.log(`  completed ${myTask}: ${summary}`)
                     steeredTasks.delete(myTask)

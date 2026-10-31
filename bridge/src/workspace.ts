@@ -257,8 +257,12 @@ export function runWorkspaceTests(): TestRunResult {
     const out = `${proc.stdout.toString()}\n${proc.stderr.toString()}`
     const passMatch = out.match(/(\d+)\s+pass/i)
     const failMatch = out.match(/(\d+)\s+fail/i)
-    const passed = passMatch ? Number(passMatch[1]) : proc.exitCode === 0 ? 4 : 3
-    const failed = failMatch ? Number(failMatch[1]) : proc.exitCode === 0 ? 0 : 1
+    // If the output could not be parsed, report that rather than guessing counts.
+    if (!passMatch && !failMatch) {
+        return { passed: 0, failed: 0, summary: "bun test: no result parsed" }
+    }
+    const passed = passMatch ? Number(passMatch[1]) : 0
+    const failed = failMatch ? Number(failMatch[1]) : 0
     return {
         passed,
         failed,
@@ -320,12 +324,78 @@ export function applyWorkerEdit(files: string[], tick: number, resumedFromSteer 
         return `verified edge-case assertions in src/parse.test.ts (${tests.summary})`
     }
 
-    const FALLBACK_NOTES = [
-        `reading ${primary}`,
-        `updating exports in ${primary}`,
-        `wiring changes in ${primary}`,
+    // Any other file — e.g. a task the AI planner invented from a judge's custom
+    // goal. Write real code for it too, so the reclaim diagnosis cites a real
+    // `git diff` on stage instead of a number we made up.
+    mkdirSync(join(WORKSPACE_DIR, primary, ".."), { recursive: true })
+    writeFileSync(join(WORKSPACE_DIR, primary), genericModule(primary, tick), "utf8")
+    git(["add", "-N", "--", primary]) // intent-to-add, so a brand new file shows in `git diff`
+    const d = inspectWorkspaceDiff([primary])
+    const what = tick === 0 ? "scaffolding" : tick === 1 ? "implementing" : "finishing"
+    return `${what} ${d.symbol ?? primary} — ${d.linesModified} lines in ${primary}`
+}
+
+/** Turns "src/add-rate.ts" into "addRate", for a plausible exported symbol. */
+function identFor(rel: string): string {
+    const stem = rel.split("/").pop()!.replace(/\.[^.]+$/, "")
+    const parts = stem.split(/[^A-Za-z0-9]+/).filter(Boolean)
+    const head = (parts[0] ?? "module").toLowerCase()
+    const tail = parts.slice(1).map((p) => p[0]!.toUpperCase() + p.slice(1).toLowerCase()).join("")
+    return head + tail
+}
+
+/** Real, compiling TypeScript that grows across ticks, so the diff is genuine. */
+function genericModule(rel: string, tick: number): string {
+    const id = identFor(rel)
+    const Cap = id[0]!.toUpperCase() + id.slice(1)
+    const head = [
+        `export interface ${Cap}Options {`,
+        "    enabled: boolean",
+        "    limit?: number",
+        "}",
+        "",
     ]
-    return FALLBACK_NOTES[Math.min(tick, FALLBACK_NOTES.length - 1)]!
+    if (tick === 0) {
+        return [
+            ...head,
+            `export function apply${Cap}(options: ${Cap}Options): boolean {`,
+            `    // TODO(agent): validate options and wire the limit`,
+            "    return options.enabled",
+            "}",
+            "",
+        ].join("\n")
+    }
+    if (tick === 1) {
+        return [
+            ...head,
+            `export function check${Cap}Limit(limit: number | undefined): number {`,
+            "    if (limit === undefined) return 100",
+            "    return Math.max(1, Math.min(limit, 10_000))",
+            "}",
+            "",
+            `export function apply${Cap}(options: ${Cap}Options): boolean {`,
+            "    if (!options.enabled) return false",
+            `    // TODO(agent): record the resolved ceiling for telemetry`,
+            `    check${Cap}Limit(options.limit)`,
+            "    return true",
+            "}",
+            "",
+        ].join("\n")
+    }
+    return [
+        ...head,
+        `export function check${Cap}Limit(limit: number | undefined): number {`,
+        "    if (limit === undefined) return 100",
+        "    return Math.max(1, Math.min(limit, 10_000))",
+        "}",
+        "",
+        `export function apply${Cap}(options: ${Cap}Options): boolean {`,
+        "    if (!options.enabled) return false",
+        `    const ceiling = check${Cap}Limit(options.limit)`,
+        "    return ceiling > 0",
+        "}",
+        "",
+    ].join("\n")
 }
 
 export type DiffCitation = {
@@ -375,12 +445,14 @@ export function inspectWorkspaceDiff(files: string[]): DiffCitation {
         }
     }
 
-    if (!totalModified) totalModified = 18
-    if (!symbol && primaryFile.includes("auth.ts")) symbol = "verifyToken()"
-
+    // Never invent a line count. If there is genuinely nothing on disk, say so —
+    // a diagnosis that cites a fake diff is worse than one that admits it has none.
     const tests = runWorkspaceTests()
     const symPart = symbol ? `after adding ${symbol} ` : ""
-    const summary = `${symPart}— ${totalModified} lines modified in ${primaryFile}`
+    const summary =
+        totalModified > 0
+            ? `${symPart}— ${totalModified} lines modified in ${primaryFile}`
+            : `mid-task on ${primaryFile} — nothing written to disk yet`
 
     return {
         summary,
