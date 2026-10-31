@@ -89,25 +89,47 @@ async function observe(): Promise<void> {
                 const open = line.match(/^(task-\d+):\s*(.+?)\s*(?:\[|$)/i)
                 if (open) known.set(open[1]!.toLowerCase(), open[2]!.trim())
             }
-            // A refusal aimed at us: give up that task and try another.
-            const refused = text.match(/^@([\w-]+) cannot take (task-\d+)/i)
-            if (refused && refused[1]!.toLowerCase() === ME.toLowerCase()) {
+            // A refusal aimed at an agent: if it's a file lock, the task is still unclaimed; if aimed at us, back off.
+            const refused = text.match(/^@([\w-]+) cannot take (task-\d+)\s*—\s*(.+)$/i)
+            if (refused) {
+                const who = refused[1]!.toLowerCase()
                 const id = refused[2]!.toLowerCase()
-                taken.add(id)
-                refusedIds.add(id)
-                if (myTask === id) {
-                    console.log(`  refused ${id} — someone beat me to it, looking for another`)
-                    myTask = null
-                    ticks = 0
+                const reason = refused[3]!.trim()
+                if (/file lock/i.test(reason)) {
+                    taken.delete(id)
+                } else {
+                    taken.add(id)
+                }
+                if (who === ME.toLowerCase()) {
+                    refusedIds.add(id)
+                    if (myTask === id) {
+                        console.log(`  refused ${id} (${reason}) — backing off to another task`)
+                        myTask = null
+                        ticks = 0
+                    }
                 }
             }
-            // A reclaim puts a task back on the market, for everyone.
-            const reclaimed = text.match(/RECLAIMED.*?(task-\d+)/i)
+            // A completed task releases any file locks it held, so retry previously lock-blocked tasks.
+            const completed = text.match(/^COMPLETED.*?(task-\d+)/i)
+            if (completed) {
+                const id = completed[1]!.toLowerCase()
+                taken.add(id)
+                refusedIds.clear()
+            }
+            // A reclaim puts a task back on the market, for everyone (except the agent that just stalled).
+            const reclaimed = text.match(/RECLAIMED\s*—\s*(\S+)\s+went quiet.*?(task-\d+)/i)
             if (reclaimed) {
-                const id = reclaimed[1]!.toLowerCase()
-                taken.delete(id)
-                refusedIds.delete(id)
-                known.set(id, known.get(id) ?? id)
+                const stalledAgent = reclaimed[1]!.toLowerCase()
+                const id = reclaimed[2]!.toLowerCase()
+                if (stalledAgent === ME.toLowerCase()) {
+                    wentQuiet = true
+                    myTask = id
+                    console.log(`  *** supervisor reclaimed ${id} from me — staying offline ***`)
+                } else {
+                    taken.delete(id)
+                    refusedIds.clear()
+                    known.set(id, known.get(id) ?? id)
+                }
             }
             continue
         }

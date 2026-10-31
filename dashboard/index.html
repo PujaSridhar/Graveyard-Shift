@@ -100,8 +100,18 @@ header {
 }
 .banner .ic { width: 2.7rem; height: 2.7rem; flex: none; }
 .banner .tag { font-size: .8rem; font-weight: 800; letter-spacing: .2em; text-transform: uppercase; opacity: .75; }
-.banner .big { font-size: 1.95rem; font-weight: 750; letter-spacing: -0.02em; line-height: 1.12; margin-top: .1rem; }
-.banner .sub { font-size: 1.05rem; margin-top: .25rem; font-weight: 500; opacity: .85; }
+.banner .big { font-size: 1.8rem; font-weight: 750; letter-spacing: -0.02em; line-height: 1.12; margin-top: .1rem; }
+.banner .sub { font-size: 1rem; margin-top: .2rem; font-weight: 500; opacity: .85; }
+.banner .bmain { flex: 1; min-width: 0; }
+.why { margin-top: .75rem; padding: .6rem .95rem .7rem; border-left: 4px solid #1c0603; background: rgba(28, 6, 3, .16); border-radius: 0 8px 8px 0; }
+.why-k { display: flex; align-items: center; gap: .6rem; font-size: .72rem; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; opacity: .78; }
+.why-k .live { display: none; align-items: center; gap: .4rem; }
+.why-k .live::before { content: ""; width: .55rem; height: .55rem; border-radius: 50%; background: #1c0603; animation: dot 0.9s ease-in-out infinite; }
+.why.streaming .why-k .live { display: inline-flex; }
+.why p { margin-top: .3rem; font-size: 1.3rem; line-height: 1.35; font-weight: 560; letter-spacing: -0.005em; min-height: calc(1.3rem * 1.35 * 2); color: #1c0603; overflow-wrap: anywhere; }
+.why .cur { display: none; width: .5em; height: 1.05em; margin-left: .12em; vertical-align: -.17em; background: #1c0603; animation: blink .8s steps(1) infinite; }
+.why.streaming .cur { display: inline-block; }
+@keyframes blink { 50% { opacity: 0; } }
 .banner .count { position: absolute; left: 0; bottom: 0; height: 4px; background: rgba(28, 6, 3, .55); width: 100%; transform-origin: left; }
 .banner-wrap.show .count { animation: drain var(--hold, 12s) linear forwards; }
 @keyframes drain { to { transform: scaleX(0); } }
@@ -184,6 +194,10 @@ h2.sec span { letter-spacing: 0; text-transform: none; font-weight: 500; font-si
 .strip svg { width: 1.35rem; height: 1.35rem; color: var(--reclaim); margin-top: .05rem; }
 .strip b { color: #fff; font-weight: 650; }
 .strip small { display: block; font-size: .85rem; color: #d98a80; margin-top: .15rem; }
+.strip.lock { background: rgba(255, 181, 71, .13); border-color: rgba(255, 181, 71, .5); color: #ffe0a6; }
+.strip.lock svg { color: var(--warn); }
+.strip.lock small { color: #d9b677; }
+.chip.locked { color: var(--warn); background: rgba(255, 181, 71, .14); border: 1px solid rgba(255, 181, 71, .4); }
 .card.entering { animation: enter .6s cubic-bezier(.2, .8, .2, 1); }
 @keyframes enter { from { opacity: 0; transform: translateY(10px); } }
 
@@ -222,6 +236,8 @@ h2.sec span { letter-spacing: 0; text-transform: none; font-weight: 500; font-si
 .entry.k-progress .d { color: var(--text-3); }
 .entry.k-completed { --c: var(--done); }
 .entry.k-note { --c: var(--note); }
+.entry.k-lock { --c: var(--warn); background: #241c0d; border-left-width: 4px; }
+.entry.k-steer { --c: #4fc0ff; background: #10202b; border-left-width: 4px; }
 .entry.k-reclaimed { --c: var(--reclaim); background: #301311; border-left-width: 6px; padding: .95rem 1rem; grid-template-columns: 1.7rem 4.6rem minmax(0, 1fr); font-size: 1.2rem; box-shadow: 0 0 0 1px rgba(255, 90, 71, .45); }
 .entry.k-reclaimed svg { width: 1.7rem; height: 1.7rem; }
 .entry.k-reclaimed .kind { font-size: .85rem; }
@@ -302,10 +318,14 @@ h2.sec span { letter-spacing: 0; text-transform: none; font-weight: 500; font-si
   <div>
     <div class="banner" id="banner">
       <svg class="ic" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 14a9.5 9.5 0 1 1 2.6 8.3"/><path d="M6 6.5V14h7.5"/></svg>
-      <div>
+      <div class="bmain">
         <div class="tag">Task reclaimed</div>
         <div class="big" id="bannerBig"></div>
         <div class="sub" id="bannerSub"></div>
+        <div class="why" id="why">
+          <div class="why-k">Supervisor reasoning <span class="live">Streaming</span></div>
+          <p><span id="rText"></span><i class="cur" id="rCur"></i></p>
+        </div>
       </div>
       <div class="count"></div>
     </div>
@@ -401,6 +421,8 @@ const ICON = {
   flag: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V4M6 5h11l-2.5 4L17 13H6"/></svg>`,
   pulse: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-6 4 12 2.5-6h5"/></svg>`,
   note: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14v12l-4 4H5z"/><path d="M15 20v-4h4"/></svg>`,
+  lock: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`,
+  steer: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>`,
 };
 const KIND_ICON = { submitted: "list", claimed: "flag", progress: "pulse", completed: "check", reclaimed: "undo", note: "note" };
 const KIND_LABEL = { submitted: "Submitted", claimed: "Claimed", progress: "Progress", completed: "Completed", reclaimed: "Reclaimed", note: "Note" };
@@ -437,39 +459,91 @@ function normalise(v) {
     startedAt: v.startedAt || 0,
     lastBeatAt: v.lastBeatAt || 0,
     beats: v.beats || 0,
+    reasoning: "reasoning" in v ? v.reasoning : undefined, // undefined = this message did not carry it
   };
 }
+
+const lastAssignee = new Map(); // taskId -> most recent holder, so we can name who went quiet
+let seenReasoningKey = null;    // startedAt of the last reasoning stream we reacted to
+let bannerTask = null, bannerAt = 0;
 
 function setView(raw) {
   const next = normalise(raw);
   // ignore a stale poll that lands after a newer push
   if (view && next.startedAt === view.startedAt && next.decisions.length < view.decisions.length) return;
 
+  // reasoning: messages that omit it keep the previous value; stale shorter text for the same stream is ignored
+  const prevR = view ? view.reasoning : null;
+  if (next.reasoning === undefined) next.reasoning = prevR || null;
+  else if (next.reasoning && prevR && next.reasoning.startedAt === prevR.startedAt && next.reasoning.text.length < prevR.text.length) next.reasoning = prevR;
+
   const firstLoad = prevDecisionCount === null;
-  if (!firstLoad && next.decisions.length > prevDecisionCount && next.startedAt === (view && view.startedAt)) {
+  const sameJob = view && next.startedAt === view.startedAt;
+
+  // a reclaim begins the moment its reasoning stream does, which is before the decision is logged
+  const r = next.reasoning;
+  if (r && r.startedAt !== seenReasoningKey) {
+    seenReasoningKey = r.startedAt;
+    if (!firstLoad || r.streaming) onReclaim({ taskId: r.taskId, who: lastAssignee.get(r.taskId) || null, v: next, fromStream: true });
+  } else if (!r) seenReasoningKey = null;
+
+  if (!firstLoad && sameJob && next.decisions.length > prevDecisionCount) {
     for (const d of next.decisions.slice(prevDecisionCount)) {
-      if (d.kind === "reclaimed") onReclaim(d, next);
+      if (d.kind !== "reclaimed") continue;
+      const p = parseReclaim(d);
+      onReclaim({ taskId: p ? p.taskId : (next.tasks.find((t) => d.detail.includes(t.id)) || {}).id, who: p && p.who, secs: p && p.secs, detail: d.detail, v: next, staleReasoning: next.reasoning ? next.reasoning.startedAt : null });
     }
   }
+  for (const t of next.tasks) if (t.assignee) lastAssignee.set(t.id, t.assignee);
   prevDecisionCount = next.decisions.length;
   view = next;
   render();
 }
 
-function onReclaim(d, v) {
-  const r = parseReclaim(d);
-  const taskId = r ? r.taskId : (v.tasks.find((t) => d.detail.includes(t.id)) || {}).id;
+// Called twice per reclaim: once when the reasoning stream starts, once when the decision lands.
+let gateKey = null; // a reasoning stream (by startedAt) that belongs to an earlier reclaim and must not be shown
+function onReclaim({ taskId, who, secs, detail, v, fromStream, staleReasoning }) {
+  const wrap = $("#bannerWrap");
+  const live = wrap.classList.contains("show") && bannerTask === taskId && Date.now() - bannerAt < 20000;
+  if (fromStream) gateKey = null;
+  else if (!live) gateKey = staleReasoning; // decision came first: hide the old stream until the new one begins
   if (taskId) justReclaimed.set(taskId, Date.now());
   const task = v.tasks.find((t) => t.id === taskId);
-  $("#bannerBig").textContent = r ? `${r.who} went quiet. ${r.taskId} is back in the pool.` : d.detail;
-  $("#bannerSub").textContent = task ? `${task.title}  •  ${d.detail}` : d.detail;
-  const wrap = $("#bannerWrap");
-  wrap.style.setProperty("--hold", "14s");
-  wrap.classList.remove("show"); void wrap.offsetWidth; wrap.classList.add("show");
-  document.body.classList.remove("flash"); void document.body.offsetWidth; document.body.classList.add("flash");
+  $("#bannerBig").textContent = who ? `${who} went quiet. ${taskId} is back in the pool.` : `${taskId || "A task"} was reclaimed and is back in the pool.`;
+  $("#bannerSub").textContent = [task && task.title, detail].filter(Boolean).join("  \u2022  ");
+  bannerTask = taskId; bannerAt = Date.now();
+  wrap.style.setProperty("--hold", "16s");
+  if (live) { // same reclaim, more facts: keep the banner steady, just restart the hold timer
+    const c = $(".banner .count"); c.style.animation = "none"; void c.offsetWidth; c.style.animation = "";
+  } else {
+    wrap.classList.remove("show"); void wrap.offsetWidth; wrap.classList.add("show");
+    document.body.classList.remove("flash"); void document.body.offsetWidth; document.body.classList.add("flash");
+  }
   clearTimeout(bannerTimer);
-  bannerTimer = setTimeout(() => wrap.classList.remove("show"), 14000);
+  bannerTimer = setTimeout(() => wrap.classList.remove("show"), 16000);
 }
+
+/* ---- typewriter: paces what the actor streams so it reads as typing; never shows text that has not arrived */
+const tw = { key: null, shown: 0, last: performance.now(), painted: "" };
+function twFrame(nowMs) {
+  const rawDt = (nowMs - tw.last) / 1000; tw.last = nowMs;
+  const dt = Math.min(0.25, rawDt), throttled = rawDt > 0.6; // a throttled/background tab should not lag behind
+  const r0 = view && view.reasoning;
+  const r = r0 && r0.startedAt !== gateKey ? r0 : null;
+  const why = $("#why"), out = $("#rText");
+  if (!r) { if (tw.key !== null) { tw.key = null; tw.shown = 0; out.textContent = ""; why.classList.remove("streaming"); } return; }
+  if (tw.key !== r.startedAt) { tw.key = r.startedAt; tw.shown = 0; tw.painted = ""; }
+  const target = r.text.length, backlog = target - tw.shown;
+  if (backlog > 0) {
+    const cps = 60 + Math.max(0, backlog - 90) * 2; // steady typing, speeding up only if far behind
+    tw.shown = throttled ? target : Math.min(target, tw.shown + dt * cps);
+  }
+  const n = Math.floor(tw.shown), txt = r.text.slice(0, n);
+  if (txt !== tw.painted) { out.textContent = txt; tw.painted = txt; }
+  why.classList.toggle("streaming", r.streaming || n < target);
+}
+// a plain timer rather than requestAnimationFrame, so it keeps running even if the page is occluded
+setInterval(() => twFrame(performance.now()), 33);
 
 /* ============================================================== render */
 const cardEls = new Map();
@@ -477,22 +551,38 @@ const cardSig = new Map();
 
 function silentMs(t) { return now() - (t.lastProgressAt || t.claimedAt || now()); }
 
+function activeLockFor(t) {
+  if (!view || t.state !== "pending" || !Array.isArray(t.files) || !t.files.length) return null;
+  for (const other of view.tasks) {
+    if (other.state !== "claimed" || other.id === t.id) continue;
+    const shared = t.files.filter((f) => (other.files || []).includes(f));
+    if (shared.length > 0) return { by: other.assignee || "agent", taskId: other.id, files: shared };
+  }
+  return null;
+}
+
 function taskSig(t) {
   const rec = lastReclaimFor(t.id);
+  const lk = activeLockFor(t);
   const jr = justReclaimed.has(t.id) && Date.now() - justReclaimed.get(t.id) < 9000;
-  return JSON.stringify([t.title, t.files, t.state, t.assignee, t.attempts, rec && [rec.who, rec.secs, rec.at], jr]);
+  return JSON.stringify([t.title, t.files, t.state, t.assignee, t.attempts, rec && [rec.who, rec.secs, rec.at], lk, jr]);
 }
 
 function cardHTML(t) {
   const rec = t.state === "pending" ? lastReclaimFor(t.id) : null;
+  const lk = t.state === "pending" ? activeLockFor(t) : null;
   const prior = t.state !== "pending" ? lastReclaimFor(t.id) : null;
-  const stateWord = { pending: "Pending", claimed: "Claimed", done: "Done" }[t.state] || t.state;
+  const stateWord = { pending: lk ? "File Locked" : "Pending", claimed: "Claimed", done: "Done" }[t.state] || t.state;
 
   let foot = "";
   if (t.state === "pending") {
-    foot = rec
-      ? `<div class="strip">${ICON.undo}<div><b>Reclaimed from ${esc(rec.who)}</b>${rec.secs != null ? ` after ${rec.secs}s of silence` : ""}<small>Back in the pool, waiting for the next agent.</small></div></div>`
-      : `<div class="wait">Waiting for an agent to claim it.</div>`;
+    if (rec) {
+      foot = `<div class="strip">${ICON.undo}<div><b>Reclaimed from ${esc(rec.who)}</b>${rec.secs != null ? ` after ${rec.secs}s of silence` : ""}<small>Back in the pool, waiting for the next agent.</small></div></div>`;
+    } else if (lk) {
+      foot = `<div class="strip lock">${ICON.lock}<div><b>Locked by ${esc(lk.by)} (${esc(lk.taskId)})</b><small>Collision guard active on <code>${esc(lk.files.join(", "))}</code> until released.</small></div></div>`;
+    } else {
+      foot = `<div class="wait">Waiting for an agent to claim it.</div>`;
+    }
   } else if (t.state === "claimed") {
     foot = `<div class="holder">${avatar(t.assignee || "?")}<span>Held by <b>${esc(t.assignee || "unknown")}</b></span></div>
       <div><div class="meter"><i></i></div>
@@ -505,10 +595,11 @@ function cardHTML(t) {
     ? `<span class="attempt ${t.attempts > 1 ? "retry" : ""}">${t.attempts > 1 ? `Attempt ${t.attempts}  •  retry` : "Attempt 1"}</span>`
     : `<span class="attempt">Not started</span>`;
   const prevNote = prior && t.state === "claimed" ? `<span class="attempt">Reclaimed from ${esc(prior.who)}</span>` : "";
+  const lockedSet = new Set(lk ? lk.files : []);
 
   return `<div class="card-top">${ICON[t.state] || ICON.pending}<span class="tid">${esc(t.id)}</span><span class="pill">${stateWord}</span></div>
     <div class="title">${esc(t.title)}</div>
-    <div class="meta">${attempt}${prevNote}${(t.files || []).map((f) => `<span class="chip">${esc(f)}</span>`).join("")}</div>
+    <div class="meta">${attempt}${prevNote}${(t.files || []).map((f) => `<span class="chip${lockedSet.has(f) ? " locked" : ""}">${esc(f)}</span>`).join("")}</div>
     ${foot}`;
 }
 
@@ -585,9 +676,10 @@ function renderBoard() {
 }
 
 /* ---------------------------------------------------------- agents */
+const SYSTEM_ACTORS = new Set(["supervisor", "lock", "relay", "ai", "operator"]);
 function deriveAgents() {
   const order = [];
-  const add = (n) => { if (n && !order.includes(n)) order.push(n); };
+  const add = (n) => { if (n && !SYSTEM_ACTORS.has(n.toLowerCase()) && !order.includes(n)) order.push(n); };
   for (const d of view.decisions) { const m = /^([\w.\-]+) (?:claimed|on|went quiet|finished)\b/.exec(d.detail); if (m) add(m[1]); }
   for (const t of view.tasks) add(t.assignee);
 
@@ -648,8 +740,26 @@ function decorate(text) {
 }
 function entryEl(d, fresh) {
   const el = document.createElement("div");
-  el.className = `entry k-${d.kind}${fresh ? " fresh" : ""}`;
-  el.innerHTML = `${ICON[KIND_ICON[d.kind] || "note"]}<time>${fmtClock(d.at)}</time><div><span class="kind">${KIND_LABEL[d.kind] || esc(d.kind)}</span><div class="d">${decorate(d.detail)}</div></div>`;
+  let cls = `k-${d.kind}`;
+  let icon = ICON[KIND_ICON[d.kind] || "note"];
+  let label = KIND_LABEL[d.kind] || esc(d.kind);
+  let detailText = d.detail;
+
+  if (d.kind === "note") {
+    if (/^lock guard:/i.test(d.detail)) {
+      cls = "k-lock"; icon = ICON.lock; label = "File Lock Guard";
+      detailText = d.detail.replace(/^lock guard:\s*/i, "");
+    } else if (/^relay dm/i.test(d.detail)) {
+      cls = "k-steer"; icon = ICON.steer; label = "Agent Relay Steer";
+    } else if (/^ai planner/i.test(d.detail)) {
+      cls = "k-note"; icon = ICON.note; label = "AI Task Planner";
+    } else if (/^supervisor:/i.test(d.detail)) {
+      cls = "k-note"; icon = ICON.note; label = "Supervisor AI";
+      detailText = d.detail.replace(/^supervisor:\s*/i, "");
+    }
+  }
+  el.className = `entry ${cls}${fresh ? " fresh" : ""}`;
+  el.innerHTML = `${icon}<time>${fmtClock(d.at)}</time><div><span class="kind">${label}</span><div class="d">${decorate(detailText)}</div></div>`;
   return el;
 }
 function renderLog() {
@@ -794,8 +904,46 @@ async function poll() {
   } finally { polling = false; }
 }
 
+async function triggerSeed(goal = "") {
+  try {
+    const res = await fetch("/api/seed", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ goal }),
+    });
+    const j = await res.json();
+    if (j.view) setView(j.view);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function triggerStall() {
+  try {
+    const res = await fetch("/api/stall", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ target: "codex" }),
+    });
+    const j = await res.json();
+    if (j.view) setView(j.view);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
 (async function boot() {
-  try { const c = await getJSON("/api/config"); window.__jobId = c.jobId; clockOffset = c.serverNow - Date.now(); $("#jobid").textContent = c.jobId; } catch {}
+  try {
+    const c = await getJSON("/api/config");
+    window.__jobId = c.jobId;
+    clockOffset = c.serverNow - Date.now();
+    $("#jobid").textContent = c.jobId;
+  } catch {}
+  window.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === "r" || e.key === "R") triggerSeed("");
+    if (e.key === "k" || e.key === "K") triggerStall();
+  });
   setConn("polling", "Connecting");
   poll();
   connect();

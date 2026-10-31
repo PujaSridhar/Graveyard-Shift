@@ -1,0 +1,12 @@
+{
+  "name": "graveyard-shift",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "demo": "bun run demo.ts",
+    "seed": "bun run bridge/src/seed.ts",
+    "scenario": "bun run driver/src/scenario.ts",
+    "test:ai": "bun run actor/src/reasoning.test.ts"
+  }
+}

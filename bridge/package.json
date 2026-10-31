@@ -5,6 +5,8 @@
   "private": true,
   "scripts": {
     "start": "bun run src/bridge.ts",
-    "agents": "bun run src/fake-agents.ts"
+    "seed": "bun run src/seed.ts",
+    "worker:codex": "bun run src/worker.ts codex --die-after 2",
+    "worker:claude": "bun run src/worker.ts claude-code"
   }
 }

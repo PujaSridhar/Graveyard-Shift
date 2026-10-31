@@ -184,6 +184,26 @@ export class JobSupervisor extends Actor<{ viewer: string }, { kind: string }, J
         if (task.state === "claimed") return { ok: false, reason: `already held by ${task.assignee}` }
         if (task.state === "done") return { ok: false, reason: "already done" }
 
+        // File-lock collision guard: prevent two agents from editing the same file concurrently.
+        const conflict = this.tasks.find(
+            (t) =>
+                t.state === "claimed" &&
+                t.id !== taskId &&
+                t.assignee !== agent &&
+                t.files.some((f) => task.files.includes(f)),
+        )
+        if (conflict) {
+            const shared = task.files.filter((f) => conflict.files.includes(f))
+            const reason = `file lock on ${shared.join(", ")} (held by ${conflict.assignee} on ${conflict.id})`
+            this.decisions = appendDecision(
+                this.decisions,
+                "note",
+                `lock guard: blocked ${agent} on ${taskId} — ${shared.join(", ")} locked by ${conflict.assignee} (${conflict.id})`,
+            )
+            this.broadcast(await this.snapshot())
+            return { ok: false, reason }
+        }
+
         const now = Date.now()
         this.tasks = patchTask(this.tasks, taskId, {
             state: "claimed",
@@ -201,6 +221,32 @@ export class JobSupervisor extends Actor<{ viewer: string }, { kind: string }, J
 
     /** The agent is alive and working. This is what stops the supervisor reclaiming. */
     async reportProgress(agent: string, taskId: string, note: string): Promise<void> {
+        if (agent === "supervisor") {
+            this.decisions = appendDecision(this.decisions, "note", note)
+            this.broadcast(await this.snapshot())
+            return
+        }
+        if (agent === "operator" && note === "__stall__") {
+            const target =
+                this.tasks.find((t) => t.state === "claimed" && (t.id === taskId || t.assignee === taskId)) ??
+                this.tasks.find((t) => t.state === "claimed")
+            if (!target) return
+            const now = Date.now()
+            const backdated = now - Math.max(1000, this.stallAfterMs - 1400)
+            this.tasks = patchTask(this.tasks, target.id, {
+                claimedAt: Math.min(target.claimedAt ?? backdated, backdated),
+                lastProgressAt: backdated,
+            })
+            this.decisions = appendDecision(
+                this.decisions,
+                "note",
+                `supervisor: signal drop detected on ${target.assignee} (${target.id}) — watching closely`,
+            )
+            this.alarm.set(now + 1500)
+            this.broadcast(await this.snapshot())
+            return
+        }
+
         const task = this.tasks.find((t) => t.id === taskId)
         if (!task || task.assignee !== agent) return
 

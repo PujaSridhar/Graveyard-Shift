@@ -15,10 +15,17 @@ export type ReclaimContext = {
     agent: string
     silentForMs: number
     attempts: number
+    /** Last progress note reported by the stalled agent before going silent. */
+    lastProgressNote?: string
     /** Candidates it could be reassigned to. */
     otherAgents: string[]
     /** Most recent last. */
     recentDecisions: { kind: string; detail: string }[]
+}
+
+export type DecomposedTask = {
+    title: string
+    files: string[]
 }
 
 const MODELS = ["gpt-5.1", "gpt-4.1-mini"]
@@ -40,8 +47,18 @@ function seconds(ms: number): string {
 export function fallbackReclaim(ctx: ReclaimContext): string {
     const next = ctx.otherAgents[0]
     const tries = ctx.attempts === 1 ? "one attempt" : `${ctx.attempts} attempts`
-    const tail = next ? `handing "${ctx.taskTitle}" to ${next}.` : `putting "${ctx.taskTitle}" back up for grabs.`
-    return `${ctx.agent} has been silent for ${seconds(ctx.silentForMs)}s on ${ctx.taskId} after ${tries} — ${tail}`
+    const chk = ctx.lastProgressNote ? ` while ${ctx.lastProgressNote}` : ""
+    const tail = next
+        ? `releasing [${ctx.files.join(", ") || ctx.taskId}] and steering ${next} to take over.`
+        : `putting "${ctx.taskTitle}" back up for grabs.`
+    return `${ctx.agent} stalled for ${seconds(ctx.silentForMs)}s on ${ctx.taskId}${chk} (${tries}) — ${tail}`
+}
+
+/** Builds the Agent Relay DM steer payload sent to the surviving agent. */
+export function buildSteerMessage(ctx: ReclaimContext, diagnosis: string): string {
+    const files = ctx.files.length > 0 ? ` [${ctx.files.join(", ")}]` : ""
+    const checkpoint = ctx.lastProgressNote ? ` Last checkpoint from ${ctx.agent}: "${ctx.lastProgressNote}".` : ""
+    return `STEER ${ctx.taskId}${files} — "${ctx.taskTitle}".${checkpoint} Supervisor: ${diagnosis}`
 }
 
 function buildUserPrompt(ctx: ReclaimContext): string {
@@ -51,9 +68,10 @@ function buildUserPrompt(ctx: ReclaimContext): string {
         .join("\n")
     return [
         `Task ${ctx.taskId}: "${ctx.taskTitle}"`,
-        `Files: ${ctx.files.slice(0, 6).join(", ") || "none"}`,
+        `Files locked: ${ctx.files.slice(0, 6).join(", ") || "none"}`,
         `Silent agent: ${ctx.agent}, quiet for ${seconds(ctx.silentForMs)}s, attempts so far: ${ctx.attempts}`,
-        `Other agents available: ${ctx.otherAgents.join(", ") || "none"}`,
+        ctx.lastProgressNote ? `Last checkpoint before stall: "${ctx.lastProgressNote}"` : "",
+        `Other agents available to steer via Agent Relay: ${ctx.otherAgents.join(", ") || "none"}`,
         recent ? `Recent decisions:\n${recent}` : "",
     ]
         .filter(Boolean)
@@ -166,4 +184,84 @@ export async function explainReclaim(
     const fb = fallbackReclaim(ctx)
     safeEmit(onToken, fb)
     return fb
+}
+
+const DECOMPOSE_PROMPT =
+    "You are the Graveyard Shift task planner for a multi-agent coding team. " +
+    "Break the user's engineering goal into exactly 4 concrete coding tasks. " +
+    "Make task 1 and task 2 share at least one file path so the supervisor's file-lock collision guard is exercised, " +
+    "while task 3 and task 4 touch independent files. " +
+    'Return ONLY a JSON array of 4 objects: [{"title":"short imperative title","files":["src/path.ts"]}]. No markdown fences.'
+
+export function fallbackDecompose(goal?: string): DecomposedTask[] {
+    const g = (goal ?? "").trim()
+    if (!g) {
+        return [
+            { title: "refactor the auth middleware", files: ["src/auth.ts", "src/session.ts"] },
+            { title: "tighten session token expiry", files: ["src/auth.ts", "src/token.ts"] },
+            { title: "add retries to the fetch client", files: ["src/http.ts"] },
+            { title: "write tests for the parser", files: ["src/parse.test.ts"] },
+        ]
+    }
+    const slug =
+        g
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-|-$/g, "")
+            .split("-")
+            .slice(0, 2)
+            .join("-") || "core"
+    return [
+        { title: `implement ${g.slice(0, 42)} core logic`, files: [`src/${slug}.ts`, `src/types.ts`] },
+        { title: `wire validation & guards for ${slug}`, files: [`src/${slug}.ts`, `src/guard.ts`] },
+        { title: `add telemetry & retry instrumentation`, files: [`src/telemetry.ts`] },
+        { title: `add integration tests for ${slug}`, files: [`src/${slug}.test.ts`] },
+    ]
+}
+
+export async function decomposeGoal(goal: string): Promise<DecomposedTask[]> {
+    const trimmed = goal.trim()
+    if (!trimmed) return fallbackDecompose()
+    try {
+        const apiKey = process.env.OPENAI_API_KEY
+        if (!apiKey) return fallbackDecompose(trimmed)
+
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 5500)
+        try {
+            const res = await fetch("https://api.openai.com/v1/chat/completions", {
+                method: "POST",
+                headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+                body: JSON.stringify({
+                    model: "gpt-4.1-mini",
+                    temperature: 0.3,
+                    max_completion_tokens: 260,
+                    messages: [
+                        { role: "system", content: DECOMPOSE_PROMPT },
+                        { role: "user", content: trimmed },
+                    ],
+                }),
+                signal: controller.signal,
+            })
+            if (!res.ok) return fallbackDecompose(trimmed)
+            const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
+            const raw = data.choices?.[0]?.message?.content?.trim() ?? ""
+            const start = raw.indexOf("[")
+            const end = raw.lastIndexOf("]")
+            if (start >= 0 && end > start) {
+                const parsed = JSON.parse(raw.slice(start, end + 1)) as DecomposedTask[]
+                if (Array.isArray(parsed) && parsed.length >= 2) {
+                    return parsed.slice(0, 5).map((t, i) => ({
+                        title: String(t.title || `task ${i + 1}`).slice(0, 70),
+                        files: Array.isArray(t.files) && t.files.length > 0 ? t.files.map(String).slice(0, 3) : [`src/mod-${i + 1}.ts`],
+                    }))
+                }
+            }
+        } finally {
+            clearTimeout(timer)
+        }
+    } catch {
+        // fall through to deterministic decomposition
+    }
+    return fallbackDecompose(trimmed)
 }

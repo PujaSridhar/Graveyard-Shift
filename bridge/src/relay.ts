@@ -17,7 +17,15 @@ export type RelayMessage = {
     createdAt: string
 }
 
-const OVERLOADED = /overloaded|rate.?limit|retry.?after/i
+/**
+ * Match only the server's actual overload phrasing.
+ *
+ * This used to be /overloaded|rate.?limit|retry.?after/i, tested against the
+ * whole CLI output — which includes message text. Any task titled "add rate
+ * limiting" therefore looked like an overload, every retry failed, and the
+ * entire Relay layer died. Keep this narrow and anchored to the server's words.
+ */
+const OVERLOADED = /temporarily overloaded|retry after the interval|\b429\b/i
 
 async function run(args: string[], token: string): Promise<string> {
     let lastErr = ""
