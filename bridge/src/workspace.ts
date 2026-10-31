@@ -438,7 +438,8 @@ export function inspectWorkspaceDiff(files: string[]): DiffCitation {
     let symbol: string | null = null
     for (const line of patch.split("\n")) {
         if (!line.startsWith("+") || line.startsWith("+++")) continue
-        const fnMatch = line.match(/function\s+([A-Za-z0-9_]+)\s*\(/)
+        // `[<(]` so a generic like `withBackoff<T>(` still yields its name.
+        const fnMatch = line.match(/function\s+([A-Za-z0-9_]+)\s*[<(]/)
         if (fnMatch) {
             symbol = `${fnMatch[1]}()`
             break

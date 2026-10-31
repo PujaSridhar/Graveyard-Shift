@@ -216,9 +216,14 @@ async function main(): Promise<void> {
                     // planner invented, cite the real diff rather than an unrelated
                     // suite that was never going to pass.
                     const tests = runWorkspaceTests()
-                    const proof = tests.passed > 0 ? tests.summary : inspectWorkspaceDiff(files).summary
+                    // Only cite the suite when it is actually green for this task. A red
+                    // count on a finished card reads as a broken change, and the seeded
+                    // suite covers auth.ts — it says nothing about a task on another file.
+                    const green = tests.passed > 0 && tests.failed === 0
+                    // The diff summary leads with its own em dash when it found no symbol.
+                    const proof = (green ? tests.summary : inspectWorkspaceDiff(files).summary).replace(/^—\s*/, "")
                     const summary = isSteered
-                        ? tests.passed > 0
+                        ? green
                             ? `resumed from codex's verifyToken() diff & wired expiry (${tests.summary})`
                             : `resumed from codex's partial diff — ${proof}`
                         : `change landed — ${proof}`
