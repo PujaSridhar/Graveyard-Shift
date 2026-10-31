@@ -899,6 +899,7 @@ async function getJSON(url) {
 function onMessage(ev) {
   let m; try { m = JSON.parse(ev.data); } catch { return; }
   lastMsgAt = Date.now();
+  setConn("live", "Live");
   if (m && Array.isArray(m.tasks)) return setView(m);                       // full JobView broadcast
   if (m && m.state && Array.isArray(m.state.tasks)) return setView(m.state); // full state on connect
   if (m && m.type === "state_update" && m.changes && view) return setView({ ...view, ...m.changes });
@@ -939,9 +940,9 @@ async function poll() {
     const j = await getJSON("/api/snapshot");
     if (j.serverNow) clockOffset = j.serverNow - Date.now();
     setView(j.view);
-    if (!wsOpen) setConn("polling", "Polling");
+    setConn(wsOpen ? "live" : "polling", wsOpen ? "Live" : "Polling");
   } catch (e) {
-    setConn("down", "Offline");
+    if (!wsOpen) setConn("down", "Offline");
   } finally { polling = false; }
 }
 
